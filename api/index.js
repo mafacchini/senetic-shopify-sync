@@ -86,11 +86,7 @@ app.get('/import-shopify', async (req, res) => {
       const shopifyProduct = {
         product: {
           title: prodotto.itemDescription || '',
-          body_html: prodotto.longItemDescription ? 
-            he.decode(prodotto.longItemDescription)
-              .replace(/href="\/\/senetic\.pl\//g, 'href="https://senetic.pl/')
-              .replace(/src="\/\/senetic\.pl\//g, 'src="https://senetic.pl/')
-            : '',
+          body_html: prodotto.longItemDescription ? he.decode(prodotto.longItemDescription) : '',
           vendor: prodotto.productPrimaryBrand?.brandNodeName || '',
           product_type: prodotto.productSecondaryCategory?.categoryNodeName || '',
           variants: [
@@ -261,11 +257,7 @@ app.get('/import-shopify-cron', async (req, res) => {
       const shopifyProduct = {
         product: {
           title: prodotto.itemDescription || '',
-          body_html: prodotto.longItemDescription ? 
-            he.decode(prodotto.longItemDescription)
-              .replace(/href="\/\/senetic\.pl\//g, 'href="https://senetic.pl/')
-              .replace(/src="\/\/senetic\.pl\//g, 'src="https://senetic.pl/')
-            : '',
+          body_html: prodotto.longItemDescription ? he.decode(prodotto.longItemDescription) : '',
           vendor: prodotto.productPrimaryBrand?.brandNodeName || '',
           product_type: prodotto.productSecondaryCategory?.categoryNodeName || '',
           variants: [
