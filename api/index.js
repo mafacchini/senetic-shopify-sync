@@ -9,21 +9,6 @@ const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 
 app.get('/import-shopify', async (req, res) => {
-  function sanitizeHtml(html) {
-    if (!html) return '';
-    
-    try {
-      const decoded = he.decode(html);
-      // Usa replace più semplici e sicuri
-      return decoded
-        .replace(/\/\/senetic\.pl\//g, 'https://senetic.pl/')
-        .replace(/\/\/www\.senetic\.pl\//g, 'https://www.senetic.pl/');
-    } catch (error) {
-      console.warn('Errore sanitizzazione HTML:', error.message);
-      return he.decode(html); // Fallback: solo decode
-    }
-  }
-
   try {
     // 1. Recupera inventario e catalogo
     const [inventoryResponse, catalogueResponse] = await Promise.all([
@@ -101,7 +86,7 @@ app.get('/import-shopify', async (req, res) => {
       const shopifyProduct = {
         product: {
           title: prodotto.itemDescription || '',
-          body_html: sanitizeHtml(prodotto.longItemDescription),
+          body_html: prodotto.longItemDescription ? he.decode(prodotto.longItemDescription) : '',
           vendor: prodotto.productPrimaryBrand?.brandNodeName || '',
           product_type: prodotto.productSecondaryCategory?.categoryNodeName || '',
           variants: [
@@ -197,21 +182,6 @@ app.get('/import-shopify-cron', async (req, res) => {
 
   console.log('✅ Token CRON valido - avvio sincronizzazione');
 
-  function sanitizeHtml(html) {
-    if (!html) return '';
-    
-    try {
-      const decoded = he.decode(html);
-      // Usa replace più semplici e sicuri
-      return decoded
-        .replace(/\/\/senetic\.pl\//g, 'https://senetic.pl/')
-        .replace(/\/\/www\.senetic\.pl\//g, 'https://www.senetic.pl/');
-    } catch (error) {
-      console.warn('Errore sanitizzazione HTML:', error.message);
-      return he.decode(html); // Fallback: solo decode
-    }
-  }
-
   // Stesso codice dell'endpoint normale ma con più prodotti
   try {
     // 1. Recupera inventario e catalogo
@@ -287,7 +257,7 @@ app.get('/import-shopify-cron', async (req, res) => {
       const shopifyProduct = {
         product: {
           title: prodotto.itemDescription || '',
-          body_html: sanitizeHtml(prodotto.longItemDescription),
+          body_html: prodotto.longItemDescription ? he.decode(prodotto.longItemDescription) : '',
           vendor: prodotto.productPrimaryBrand?.brandNodeName || '',
           product_type: prodotto.productSecondaryCategory?.categoryNodeName || '',
           variants: [
