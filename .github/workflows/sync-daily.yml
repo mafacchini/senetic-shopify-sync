@@ -45,24 +45,37 @@ jobs:
           
           echo "📊 Codice risposta HTTP: $response"
           
+          # 🔍 DEBUG: Mostra il contenuto raw del file
+          echo "📄 Contenuto raw di response.json:"
+          cat response.json
+          echo ""
+          echo "📏 Dimensione file: $(wc -c < response.json) bytes"
+          
           # Verifica se la risposta è successo
           if [ $response -eq 200 ]; then
             echo "✅ Sincronizzazione completata con successo!"
             
-            # Mostra statistiche se disponibili
+            # 🔍 DEBUG: Controlla se è JSON valido prima di usare jq
             if command -v jq &> /dev/null; then
-              echo "📈 Statistiche sincronizzazione:"
-              cat response.json | jq '.stats // empty'
-              
-              echo "📋 Primi 3 prodotti processati:"
-              cat response.json | jq '.risultati[0:3] // empty'
+              if jq empty response.json 2>/dev/null; then
+                echo "✅ JSON valido, elaboro statistiche..."
+                echo "📈 Statistiche sincronizzazione:"
+                cat response.json | jq '.stats // empty'
+                
+                echo "📋 Primi 3 prodotti processati:"
+                cat response.json | jq '.risultati[0:3] // empty'
+              else
+                echo "❌ JSON non valido in response.json"
+                echo "📄 Contenuto file:"
+                head -200 response.json
+              fi
             else
-              echo "📄 Risposta completa:"
+              echo "📄 jq non disponibile, mostro contenuto raw:"
               head -500 response.json
             fi
             
           else
-            echo "❌ Errore durante la sincronizzazione"
+            echo "❌ Errore durante la sincronizzazione (HTTP $response)"
             echo "📄 Dettagli errore:"
             cat response.json
             exit 1

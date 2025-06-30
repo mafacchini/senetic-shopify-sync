@@ -173,8 +173,6 @@ app.get('/', (req, res) => {
   });
 });
 
-module.exports = app;
-
 app.get('/import-shopify-cron', async (req, res) => {
   // Verifica token di sicurezza
   const authHeader = req.headers['x-cron-token'];
@@ -340,3 +338,5 @@ app.get('/import-shopify-cron', async (req, res) => {
     res.status(500).json({ error: error.toString() });
   }
 });
+
+module.exports = app;
