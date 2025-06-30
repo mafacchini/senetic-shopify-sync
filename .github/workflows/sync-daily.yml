@@ -1,0 +1,110 @@
+name: '🛍️ Sincronizzazione Senetic → Shopify'
+
+on:
+  schedule:
+    # Ogni giorno alle 6:00 UTC (8:00 ora italiana CEST)
+    - cron: '0 6 * * *'
+  workflow_dispatch: # Permette esecuzione manuale dal pulsante
+
+env:
+  API_URL: 'https://app-senetic-shopify-7spzzv1u2-massimos-projects-165d2cc0.vercel.app'
+
+jobs:
+  sync-products:
+    name: '📦 Importa Prodotti da Senetic'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: '🚀 Inizio Sincronizzazione'
+        run: |
+          echo "🕕 Avvio sincronizzazione automatica alle $(date)"
+          echo "🌐 URL API: ${{ env.API_URL }}"
+          echo "📅 Esecuzione programmata: ogni giorno alle 6:00 UTC"
+          
+      - name: '🔍 Verifica Stato API'
+        run: |
+          echo "📡 Controllo che l'API sia online..."
+          response=$(curl -s -w "%{http_code}" -o /dev/null ${{ env.API_URL }})
+          
+          if [ $response -eq 200 ]; then
+            echo "✅ API online e raggiungibile"
+          else
+            echo "❌ API non raggiungibile (HTTP $response)"
+            exit 1
+          fi
+          
+      - name: '📡 Esegui Sincronizzazione'
+        run: |
+          echo "🔄 Avvio processo di sincronizzazione..."
+          
+          # Esegui la chiamata API con timeout di 20 minuti
+          response=$(curl -s -w "%{http_code}" -o response.json --max-time 1200 \
+            -H "X-Cron-Token: ${{ secrets.CRON_SECRET }}" \
+            ${{ env.API_URL }}/import-shopify-cron)
+          
+          echo "📊 Codice risposta HTTP: $response"
+          
+          # Verifica se la risposta è successo
+          if [ $response -eq 200 ]; then
+            echo "✅ Sincronizzazione completata con successo!"
+            
+            # Mostra statistiche se disponibili
+            if command -v jq &> /dev/null; then
+              echo "📈 Statistiche sincronizzazione:"
+              cat response.json | jq '.stats // empty'
+              
+              echo "📋 Primi 3 prodotti processati:"
+              cat response.json | jq '.risultati[0:3] // empty'
+            else
+              echo "📄 Risposta completa:"
+              head -500 response.json
+            fi
+            
+          else
+            echo "❌ Errore durante la sincronizzazione"
+            echo "📄 Dettagli errore:"
+            cat response.json
+            exit 1
+          fi
+          
+      - name: '📊 Salva Logs di Sincronizzazione'
+        if: always()
+        run: |
+          echo "💾 Salvataggio logs per debug..."
+          
+          # Crea un file di log con timestamp
+          log_file="sync-log-$(date +%Y%m%d-%H%M%S).json"
+          
+          # Aggiungi metadata al log
+          echo "{" > $log_file
+          echo "  \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"," >> $log_file
+          echo "  \"workflow_run\": \"${{ github.run_id }}\"," >> $log_file
+          echo "  \"trigger\": \"${{ github.event_name }}\"," >> $log_file
+          echo "  \"api_response\": " >> $log_file
+          cat response.json >> $log_file
+          echo "}" >> $log_file
+          
+          echo "📁 Log salvato in: $log_file"
+          
+      - name: '🎯 Riepilogo Finale'
+        if: always()
+        run: |
+          echo "📋 === RIEPILOGO SINCRONIZZAZIONE ==="
+          echo "🕐 Completato alle: $(date)"
+          echo "🆔 Workflow ID: ${{ github.run_id }}"
+          echo "📍 Eseguito da: ${{ github.event_name }}"
+          
+          if [ -f response.json ]; then
+            if command -v jq &> /dev/null; then
+              processed=$(cat response.json | jq -r '.stats.processed // "N/A"')
+              success=$(cat response.json | jq -r '.stats.success // "N/A"')
+              errors=$(cat response.json | jq -r '.stats.errors // "N/A"')
+              
+              echo "📦 Prodotti processati: $processed"
+              echo "✅ Successi: $success"
+              echo "❌ Errori: $errors"
+            fi
+          fi
+          
+          echo "🔗 Visualizza dettagli: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
