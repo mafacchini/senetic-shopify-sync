@@ -1,2 +1,18 @@
+# Environment variables (tokens sensibili)
 .env
-.vercel
+.env.local
+.env.production
+
+# Dependencies
+node_modules/
+
+# Vercel
+.vercel/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS generated files
+.DS_Store
+Thumbs.db
