@@ -292,17 +292,25 @@ app.get('/import-shopify-cron', async (req, res) => {
         const existingVariants = searchResponse.data.variants || [];
 
         if (existingVariants.length > 0) {
-          // ✅ PRODOTTO ESISTENTE - AGGIORNA
+          // ✅ PRODOTTO ESISTENTE - AGGIORNA SOLO DATI SPECIFICI
           const existingVariant = existingVariants[0];
           const productId = existingVariant.product_id;
           const variantId = existingVariant.id;
 
           console.log(`🔄 [CRON] Aggiornando prodotto esistente: ${prodotto.manufacturerItemCode} (ID: ${productId})`);
 
-          // Aggiorna il prodotto
+          // 1. Aggiorna solo i dati del prodotto (non sovrascrivere tutto)
           await axios.put(
             `${SHOPIFY_STORE_URL}/admin/api/2024-04/products/${productId}.json`,
-            shopifyProduct,
+            {
+              product: {
+                id: productId,
+                title: shopifyProduct.product.title,
+                body_html: shopifyProduct.product.body_html,
+                vendor: shopifyProduct.product.vendor,
+                product_type: shopifyProduct.product.product_type
+              }
+            },
             {
               headers: {
                 'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
@@ -311,15 +319,18 @@ app.get('/import-shopify-cron', async (req, res) => {
             }
           );
 
-          // Aggiorna la variante per inventario
+          // 2. Aggiorna solo la variante specifica (prezzi, inventario, ecc.)
           await axios.put(
             `${SHOPIFY_STORE_URL}/admin/api/2024-04/variants/${variantId}.json`,
             {
               variant: {
                 id: variantId,
-                inventory_quantity: availability,
                 price: shopifyProduct.product.variants[0].price,
-                cost: shopifyProduct.product.variants[0].cost
+                cost: shopifyProduct.product.variants[0].cost,
+                inventory_quantity: availability,
+                barcode: shopifyProduct.product.variants[0].barcode,
+                weight: shopifyProduct.product.variants[0].weight,
+                weight_unit: shopifyProduct.product.variants[0].weight_unit
               }
             },
             {
@@ -332,24 +343,16 @@ app.get('/import-shopify-cron', async (req, res) => {
           
           risultati.push({
             title: shopifyProduct.product.title,
-            body_html: shopifyProduct.product.body_html,
-            vendor: shopifyProduct.product.vendor,
-            product_type: shopifyProduct.product.product_type,
             price: shopifyProduct.product.variants[0].price,
-            cost: shopifyProduct.product.variants[0].cost,
             sku: shopifyProduct.product.variants[0].sku,
-            barcode: shopifyProduct.product.variants[0].barcode,
-            inventory_quantity: shopifyProduct.product.variants[0].inventory_quantity,
-            inventory_management: shopifyProduct.product.variants[0].inventory_management,
-            weight: shopifyProduct.product.variants[0].weight,
-            weight_unit: shopifyProduct.product.variants[0].weight_unit,
             status: 'aggiornato',
             shopify_id: productId,
-            action: 'updated'
+            action: 'updated',
+            variant_id: variantId
           });
 
         } else {
-          // 🆕 PRODOTTO NUOVO - CREA
+          // 🆕 PRODOTTO NUOVO - CREA (questo rimane uguale)
           console.log(`🆕 [CRON] Creando nuovo prodotto: ${prodotto.manufacturerItemCode}`);
           
           const createResult = await axios.post(
