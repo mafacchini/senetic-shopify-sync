@@ -7,7 +7,7 @@ on:
   workflow_dispatch: # Permette esecuzione manuale dal pulsante
 
 env:
-  API_URL: 'https://app-senetic-shopify-7spzzv1u2-massimos-projects-165d2cc0.vercel.app'
+  API_URL: 'https://app-senetic-shopify-mzu6ru5o5-massimos-projects-165d2cc0.vercel.app'
 
 jobs:
   sync-products:
