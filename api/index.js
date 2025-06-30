@@ -247,16 +247,13 @@ app.get('/import-shopify-cron', async (req, res) => {
     const prodottiDaImportare = prodottiFiltrati.slice(0, 20);
 
     for (const prodotto of prodottiDaImportare) {
-      // Cerca il prodotto nell'inventario tramite manufacturerItemCode
       const inventoryItem = inventoryMap[prodotto.manufacturerItemCode];
-      if (!inventoryItem) continue; // Salta se non presente in inventario
+      if (!inventoryItem) continue;
 
-      // Calcola la quantità totale disponibile
       const availability = inventoryItem.availability && Array.isArray(inventoryItem.availability.stockSchedules)
         ? inventoryItem.availability.stockSchedules.reduce((sum, s) => sum + (s.targetStock || 0), 0)
         : 0;
 
-      // Costruisci il prodotto per Shopify
       const shopifyProduct = {
         product: {
           title: prodotto.itemDescription || '',
@@ -279,12 +276,11 @@ app.get('/import-shopify-cron', async (req, res) => {
       };
 
       try {
-        // ✅ FORZA CREAZIONE (senza cercare esistenti per evitare sovrascrizioni)
-        console.log(`🆕 Creando: ${prodotto.manufacturerItemCode}`);
+        // 🔍 CERCA PRODOTTO ESISTENTE per SKU
+        console.log(`🔍 [CRON] Cercando prodotto esistente: ${prodotto.manufacturerItemCode}`);
         
-        const createResult = await axios.post(
-          `${SHOPIFY_STORE_URL}/admin/api/2024-04/products.json`,
-          shopifyProduct,
+        const searchResponse = await axios.get(
+          `${SHOPIFY_STORE_URL}/admin/api/2024-04/variants.json?sku=${encodeURIComponent(prodotto.manufacturerItemCode)}`,
           {
             headers: {
               'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
@@ -293,33 +289,112 @@ app.get('/import-shopify-cron', async (req, res) => {
           }
         );
 
-        risultati.push({
-          title: shopifyProduct.product.title,
-          body_html: shopifyProduct.product.body_html,
-          vendor: shopifyProduct.product.vendor,
-          product_type: shopifyProduct.product.product_type,
-          price: shopifyProduct.product.variants[0].price,
-          cost: shopifyProduct.product.variants[0].cost,
-          sku: shopifyProduct.product.variants[0].sku,
-          barcode: shopifyProduct.product.variants[0].barcode,
-          inventory_quantity: shopifyProduct.product.variants[0].inventory_quantity,
-          inventory_management: shopifyProduct.product.variants[0].inventory_management,
-          weight: shopifyProduct.product.variants[0].weight,
-          weight_unit: shopifyProduct.product.variants[0].weight_unit,
-          status: 'ok',
-          shopify_id: createResult.data.product.id
-        });
+        const existingVariants = searchResponse.data.variants || [];
+
+        if (existingVariants.length > 0) {
+          // ✅ PRODOTTO ESISTENTE - AGGIORNA
+          const existingVariant = existingVariants[0];
+          const productId = existingVariant.product_id;
+          const variantId = existingVariant.id;
+
+          console.log(`🔄 [CRON] Aggiornando prodotto esistente: ${prodotto.manufacturerItemCode} (ID: ${productId})`);
+
+          // Aggiorna il prodotto
+          await axios.put(
+            `${SHOPIFY_STORE_URL}/admin/api/2024-04/products/${productId}.json`,
+            shopifyProduct,
+            {
+              headers: {
+                'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+                'Content-Type': 'application/json'
+              }
+            }
+          );
+
+          // Aggiorna la variante per inventario
+          await axios.put(
+            `${SHOPIFY_STORE_URL}/admin/api/2024-04/variants/${variantId}.json`,
+            {
+              variant: {
+                id: variantId,
+                inventory_quantity: availability,
+                price: shopifyProduct.product.variants[0].price,
+                cost: shopifyProduct.product.variants[0].cost
+              }
+            },
+            {
+              headers: {
+                'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+                'Content-Type': 'application/json'
+              }
+            }
+          );
+          
+          risultati.push({
+            title: shopifyProduct.product.title,
+            body_html: shopifyProduct.product.body_html,
+            vendor: shopifyProduct.product.vendor,
+            product_type: shopifyProduct.product.product_type,
+            price: shopifyProduct.product.variants[0].price,
+            cost: shopifyProduct.product.variants[0].cost,
+            sku: shopifyProduct.product.variants[0].sku,
+            barcode: shopifyProduct.product.variants[0].barcode,
+            inventory_quantity: shopifyProduct.product.variants[0].inventory_quantity,
+            inventory_management: shopifyProduct.product.variants[0].inventory_management,
+            weight: shopifyProduct.product.variants[0].weight,
+            weight_unit: shopifyProduct.product.variants[0].weight_unit,
+            status: 'aggiornato',
+            shopify_id: productId,
+            action: 'updated'
+          });
+
+        } else {
+          // 🆕 PRODOTTO NUOVO - CREA
+          console.log(`🆕 [CRON] Creando nuovo prodotto: ${prodotto.manufacturerItemCode}`);
+          
+          const createResult = await axios.post(
+            `${SHOPIFY_STORE_URL}/admin/api/2024-04/products.json`,
+            shopifyProduct,
+            {
+              headers: {
+                'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+                'Content-Type': 'application/json'
+              }
+            }
+          );
+          
+          risultati.push({
+            title: shopifyProduct.product.title,
+            body_html: shopifyProduct.product.body_html,
+            vendor: shopifyProduct.product.vendor,
+            product_type: shopifyProduct.product.product_type,
+            price: shopifyProduct.product.variants[0].price,
+            cost: shopifyProduct.product.variants[0].cost,
+            sku: shopifyProduct.product.variants[0].sku,
+            barcode: shopifyProduct.product.variants[0].barcode,
+            inventory_quantity: shopifyProduct.product.variants[0].inventory_quantity,
+            inventory_management: shopifyProduct.product.variants[0].inventory_management,
+            weight: shopifyProduct.product.variants[0].weight,
+            weight_unit: shopifyProduct.product.variants[0].weight_unit,
+            status: 'creato',
+            shopify_id: createResult.data.product.id,
+            action: 'created'
+          });
+        }
 
       } catch (err) {
+        console.error(`❌ [CRON] Errore ${prodotto.manufacturerItemCode}:`, err.message);
         risultati.push({
-          title: shopifyProduct.product.title,
-          sku: shopifyProduct.product.variants[0].sku,
+          title: shopifyProduct.product?.title || 'Unknown',
+          sku: prodotto.manufacturerItemCode,
           status: 'errore',
-          error: err.response?.data || err.message
+          error: err.message,
+          action: 'error'
         });
       }
 
-      await new Promise(r => setTimeout(r, 200)); // Delay ridotto
+      // Rate limiting più lungo per evitare problemi
+      await new Promise(r => setTimeout(r, 800));
     }
 
     res.json({ 
@@ -327,10 +402,13 @@ app.get('/import-shopify-cron', async (req, res) => {
       risultati,
       stats: {
         processed: prodottiDaImportare.length,
-        success: risultati.filter(r => r.status === 'ok').length,
-        errors: risultati.filter(r => r.status === 'errore').length
+        created: risultati.filter(r => r.action === 'created').length,
+        updated: risultati.filter(r => r.action === 'updated').length,
+        errors: risultati.filter(r => r.action === 'error').length,
+        total_success: risultati.filter(r => r.status === 'creato' || r.status === 'aggiornato').length
       },
-      type: 'cron_job'
+      type: 'cron_job',
+      timestamp: new Date().toISOString()
     });
 
   } catch (error) {
