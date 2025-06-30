@@ -276,11 +276,12 @@ app.get('/import-shopify-cron', async (req, res) => {
       };
 
       try {
-        // 🔍 CERCA PRODOTTO ESISTENTE per SKU
+        // 🔍 CERCA PRODOTTO ESISTENTE per SKU - METODO MIGLIORATO
         console.log(`🔍 [CRON] Cercando prodotto esistente: ${prodotto.manufacturerItemCode}`);
         
+        // Usa l'endpoint products con filtro SKU invece di variants
         const searchResponse = await axios.get(
-          `${SHOPIFY_STORE_URL}/admin/api/2024-04/variants.json?sku=${encodeURIComponent(prodotto.manufacturerItemCode)}`,
+          `${SHOPIFY_STORE_URL}/admin/api/2024-04/products.json?limit=250`,
           {
             headers: {
               'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
@@ -289,17 +290,29 @@ app.get('/import-shopify-cron', async (req, res) => {
           }
         );
 
-        const existingVariants = searchResponse.data.variants || [];
+        const allProducts = searchResponse.data.products || [];
+        
+        // Trova il prodotto con la variante che ha questo SKU specifico
+        let existingProduct = null;
+        let existingVariant = null;
+        
+        for (const product of allProducts) {
+          const variant = product.variants.find(v => v.sku === prodotto.manufacturerItemCode);
+          if (variant) {
+            existingProduct = product;
+            existingVariant = variant;
+            break;
+          }
+        }
 
-        if (existingVariants.length > 0) {
-          // ✅ PRODOTTO ESISTENTE - AGGIORNA SOLO DATI SPECIFICI
-          const existingVariant = existingVariants[0];
-          const productId = existingVariant.product_id;
+        if (existingProduct && existingVariant) {
+          // ✅ PRODOTTO ESISTENTE - AGGIORNA
+          const productId = existingProduct.id;
           const variantId = existingVariant.id;
 
-          console.log(`🔄 [CRON] Aggiornando prodotto esistente: ${prodotto.manufacturerItemCode} (ID: ${productId})`);
+          console.log(`🔄 [CRON] Aggiornando prodotto esistente: ${prodotto.manufacturerItemCode} (Product ID: ${productId}, Variant ID: ${variantId})`);
 
-          // 1. Aggiorna solo i dati del prodotto (non sovrascrivere tutto)
+          // 1. Aggiorna solo i dati del prodotto
           await axios.put(
             `${SHOPIFY_STORE_URL}/admin/api/2024-04/products/${productId}.json`,
             {
@@ -319,7 +332,7 @@ app.get('/import-shopify-cron', async (req, res) => {
             }
           );
 
-          // 2. Aggiorna solo la variante specifica (prezzi, inventario, ecc.)
+          // 2. Aggiorna la variante specifica
           await axios.put(
             `${SHOPIFY_STORE_URL}/admin/api/2024-04/variants/${variantId}.json`,
             {
@@ -352,7 +365,7 @@ app.get('/import-shopify-cron', async (req, res) => {
           });
 
         } else {
-          // 🆕 PRODOTTO NUOVO - CREA (questo rimane uguale)
+          // 🆕 PRODOTTO NUOVO - CREA
           console.log(`🆕 [CRON] Creando nuovo prodotto: ${prodotto.manufacturerItemCode}`);
           
           const createResult = await axios.post(
