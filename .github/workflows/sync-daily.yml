@@ -2,8 +2,8 @@ name: '🛍️ Sincronizzazione Senetic → Shopify'
 
 on:
   # 🔥 TRIGGER SU WEBHOOK da Shopify
-  repository_dispatch:
-    types: [shopify_update]
+  # repository_dispatch:
+    # types: [shopify_update]
   
   # 📱 TRIGGER MANUALE (mantieni per debug)
   workflow_dispatch:
