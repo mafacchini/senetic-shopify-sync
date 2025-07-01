@@ -57,6 +57,7 @@ app.get('/import-shopify', async (req, res) => {
 
     // Puoi aggiungere qui tutti i brand che vuoi filtrare
     const brandDesiderati = [
+      'Dahua',
       'Hikvision',
       'Ubiquiti'
     ].map(b => b.trim().toLowerCase());
@@ -522,36 +523,64 @@ app.get('/sync-single-product/:sku', async (req, res) => {
       }
     };
 
-    // 6. Cerca prodotto esistente su Shopify (stessa logica dell'endpoint CRON)
-    const searchResponse = await axios.get(
-      `${SHOPIFY_STORE_URL}/admin/api/2024-04/products.json?limit=250`,
-      {
+    // 6. 🔧 RICERCA MIGLIORATA - Cerca in TUTTI i prodotti usando paginazione
+    console.log(`🔍 [SINGLE] Cercando prodotto esistente con SKU: ${sku}`);
+    
+    let existingProduct = null;
+    let existingVariant = null;
+    let nextPageInfo = null;
+    let hasNextPage = true;
+    
+    // Cerca attraverso tutte le pagine finché non trova il prodotto o finiscono le pagine
+    while (hasNextPage && !existingProduct) {
+      let searchUrl = `${SHOPIFY_STORE_URL}/admin/api/2024-04/products.json?limit=250`;
+      
+      if (nextPageInfo) {
+        searchUrl += `&page_info=${nextPageInfo}`;
+      }
+      
+      const searchResponse = await axios.get(searchUrl, {
         headers: {
           'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
           'Content-Type': 'application/json'
         }
-      }
-    );
+      });
 
-    const allProducts = searchResponse.data.products || [];
-    let existingProduct = null;
-    let existingVariant = null;
-    
-    for (const product of allProducts) {
-      const variant = product.variants.find(v => v.sku === sku);
-      if (variant) {
-        existingProduct = product;
-        existingVariant = variant;
-        break;
+      const products = searchResponse.data.products || [];
+      console.log(`🔍 [SINGLE] Cercando in ${products.length} prodotti...`);
+      
+      // Cerca il prodotto con la variante che ha questo SKU specifico
+      for (const product of products) {
+        const variant = product.variants.find(v => v.sku === sku);
+        if (variant) {
+          existingProduct = product;
+          existingVariant = variant;
+          console.log(`✅ [SINGLE] Prodotto trovato! ID: ${product.id}, Variant ID: ${variant.id}`);
+          break;
+        }
+      }
+      
+      // Controlla se ci sono altre pagine
+      const linkHeader = searchResponse.headers.link;
+      if (linkHeader && linkHeader.includes('rel="next"')) {
+        // Estrai page_info per la prossima pagina
+        const nextMatch = linkHeader.match(/<[^>]*[?&]page_info=([^&>]+)[^>]*>;\s*rel="next"/);
+        if (nextMatch) {
+          nextPageInfo = nextMatch[1];
+        } else {
+          hasNextPage = false;
+        }
+      } else {
+        hasNextPage = false;
       }
     }
 
     if (existingProduct && existingVariant) {
-      // 7. Aggiorna prodotto esistente (stessa logica dell'endpoint CRON)
+      // 7. ✅ AGGIORNA PRODOTTO ESISTENTE
       const productId = existingProduct.id;
       const variantId = existingVariant.id;
 
-      console.log(`🔄 [SINGLE] Aggiornando prodotto: ${sku} (ID: ${productId})`);
+      console.log(`🔄 [SINGLE] Aggiornando prodotto esistente: ${sku} (Product ID: ${productId}, Variant ID: ${variantId})`);
 
       // Aggiorna dati prodotto
       await axios.put(
@@ -601,8 +630,17 @@ app.get('/sync-single-product/:sku', async (req, res) => {
         sku: sku,
         shopify_id: productId,
         variant_id: variantId,
+        title: shopifyProduct.product.title,
+        body_html: shopifyProduct.product.body_html,
+        vendor: shopifyProduct.product.vendor,
+        product_type: shopifyProduct.product.product_type,
         price: shopifyProduct.product.variants[0].price,
-        inventory: availability,
+        cost: shopifyProduct.product.variants[0].cost,
+        barcode: shopifyProduct.product.variants[0].barcode,
+        inventory_quantity: availability,
+        inventory_management: shopifyProduct.product.variants[0].inventory_management,
+        weight: shopifyProduct.product.variants[0].weight,
+        weight_unit: shopifyProduct.product.variants[0].weight_unit,
         senetic_data: {
           title: prodotto.itemDescription,
           brand: prodotto.productPrimaryBrand?.brandNodeName,
@@ -612,18 +650,42 @@ app.get('/sync-single-product/:sku', async (req, res) => {
       });
 
     } else {
-      res.status(404).json({
-        success: false,
-        error: 'Prodotto non trovato su Shopify',
+      // 8. 🆕 CREA NUOVO PRODOTTO (solo se non esiste davvero)
+      console.log(`🆕 [SINGLE] Creando nuovo prodotto: ${sku} (non trovato in Shopify)`);
+      
+      const createResult = await axios.post(
+        `${SHOPIFY_STORE_URL}/admin/api/2024-04/products.json`,
+        shopifyProduct,
+        {
+          headers: {
+            'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      res.json({
+        success: true,
+        action: 'created',
         sku: sku,
-        action: 'not_found',
-        senetic_found: true,
+        shopify_id: createResult.data.product.id,
+        title: shopifyProduct.product.title,
+        body_html: shopifyProduct.product.body_html,
+        vendor: shopifyProduct.product.vendor,
+        product_type: shopifyProduct.product.product_type,
+        price: shopifyProduct.product.variants[0].price,
+        cost: shopifyProduct.product.variants[0].cost,
+        barcode: shopifyProduct.product.variants[0].barcode,
+        inventory_quantity: availability,
+        inventory_management: shopifyProduct.product.variants[0].inventory_management,
+        weight: shopifyProduct.product.variants[0].weight,
+        weight_unit: shopifyProduct.product.variants[0].weight_unit,
         senetic_data: {
           title: prodotto.itemDescription,
           brand: prodotto.productPrimaryBrand?.brandNodeName,
-          category: prodotto.productSecondaryCategory?.categoryNodeName,
-          inventory: availability
-        }
+          category: prodotto.productSecondaryCategory?.categoryNodeName
+        },
+        timestamp: new Date().toISOString()
       });
     }
 
