@@ -222,6 +222,7 @@ app.get('/import-shopify-cron', async (req, res) => {
 
     // Puoi aggiungere qui tutti i brand che vuoi filtrare
     const brandDesiderati = [
+      'Dahua',
       'Hikvision',
       'Ubiquiti'
     ].map(b => b.trim().toLowerCase());

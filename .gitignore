@@ -16,3 +16,14 @@ npm-debug.log*
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# File di test e backup
+*.bak
+*.backup
+*.temp
+*.tmp
+
+# Cache e build
+.cache/
+dist/
+build/
