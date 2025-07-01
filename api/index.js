@@ -433,4 +433,60 @@ app.get('/import-shopify-cron', async (req, res) => {
   }
 });
 
+app.post('/trigger-sync', async (req, res) => {
+  console.log('🔔 Webhook ricevuto - verifico origine...');
+  
+  // Semplice verifica di sicurezza (opzionale)
+  const userAgent = req.headers['user-agent'];
+  if (!userAgent || !userAgent.includes('Shopify')) {
+    console.log('⚠️ Richiesta non da Shopify, ma procedo comunque...');
+  }
+
+  try {
+    console.log('🚀 Triggering GitHub workflow...');
+    
+    // Attiva il workflow GitHub
+    const response = await axios.post(
+      'https://api.github.com/repos/mafacchini/senetic-shopify-sync/dispatches',
+      {
+        event_type: 'shopify_update',
+        client_payload: {
+          triggered_by: 'shopify_webhook',
+          timestamp: new Date().toISOString(),
+          source: 'vercel_api'
+        }
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`,
+          'Accept': 'application/vnd.github.v3+json',
+          'Content-Type': 'application/json',
+          'User-Agent': 'Senetic-Shopify-Sync/1.0'
+        }
+      }
+    );
+
+    console.log('✅ GitHub workflow attivato con successo!');
+    
+    res.json({ 
+      success: true,
+      message: 'GitHub workflow attivato con successo!',
+      workflow_triggered: true,
+      timestamp: new Date().toISOString(),
+      github_response: response.status
+    });
+
+  } catch (error) {
+    console.error('❌ Errore attivazione workflow:', error.message);
+    console.error('📄 Dettagli:', error.response?.data);
+    
+    res.status(500).json({ 
+      success: false,
+      error: 'Errore attivazione workflow',
+      details: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 module.exports = app;
