@@ -10,6 +10,9 @@ const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 
 function extractImageUrls(htmlContent) {
   if (!htmlContent) return [];
+
+  console.log(`🔍 [DEBUG] HTML content length: ${htmlContent.length}`);
+  console.log(`🔍 [DEBUG] HTML contains img tags: ${htmlContent.includes('<img')}`);
   
   const imageUrls = [];
   const imgRegex = /<img[^>]+src="([^"]+)"/gi;
@@ -561,7 +564,7 @@ app.get('/import-shopify-cron', async (req, res) => {
   
           // 🆕 CARICA IMMAGINI PER NUOVO PRODOTTO
           if (imageUrls.length > 0) {
-            console.log(`📸 Caricando ${imageUrls.length} immagini per nuovo prodotto: ${sku}`);
+            console.log(`📸 Caricando ${imageUrls.length} immagini per nuovo prodotto: ${prodotto.manufacturerItemCode}`);
             uploadedImages = await uploadImagesToShopify(imageUrls, newProductId);
           }
           
