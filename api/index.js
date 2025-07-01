@@ -433,57 +433,144 @@ app.get('/import-shopify-cron', async (req, res) => {
   }
 });
 
-app.post('/trigger-sync', async (req, res) => {
-  console.log('🔔 Webhook ricevuto - verifico origine...');
+// Aggiungi questo nuovo endpoint in api/index.js:
+
+app.get('/sync-single-product/:sku', async (req, res) => {
+  const sku = req.params.sku;
   
-  // Semplice verifica di sicurezza (opzionale)
-  const userAgent = req.headers['user-agent'];
-  if (!userAgent || !userAgent.includes('Shopify')) {
-    console.log('⚠️ Richiesta non da Shopify, ma procedo comunque...');
+  // Verifica token di sicurezza
+  const authToken = req.headers['x-sync-token'];
+  if (authToken !== process.env.SYNC_TOKEN) {
+    return res.status(401).json({ error: 'Non autorizzato' });
   }
 
   try {
-    console.log('🚀 Triggering GitHub workflow...');
-    
-    // Attiva il workflow GitHub
-    const response = await axios.post(
-      'https://api.github.com/repos/mafacchini/senetic-shopify-sync/dispatches',
-      {
-        event_type: 'shopify_update',
-        client_payload: {
-          triggered_by: 'shopify_webhook',
-          timestamp: new Date().toISOString(),
-          source: 'vercel_api'
-        }
-      },
+    console.log(`🔍 [SINGLE] Sincronizzazione prodotto: ${sku}`);
+
+    // 1. Ottieni dati da Senetic per questo SKU specifico
+    const seneticResponse = await axios.get(
+      `https://api.senetic.pl/api/products?filter[manufacturerItemCode]=${sku}`,
       {
         headers: {
-          'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`,
-          'Accept': 'application/vnd.github.v3+json',
-          'Content-Type': 'application/json',
-          'User-Agent': 'Senetic-Shopify-Sync/1.0'
+          'Authorization': `Bearer ${process.env.SENETIC_AUTH}`,
+          'Content-Type': 'application/json'
         }
       }
     );
 
-    console.log('✅ GitHub workflow attivato con successo!');
+    const prodotto = seneticResponse.data.data.find(p => p.manufacturerItemCode === sku);
     
-    res.json({ 
-      success: true,
-      message: 'GitHub workflow attivato con successo!',
-      workflow_triggered: true,
-      timestamp: new Date().toISOString(),
-      github_response: response.status
-    });
+    if (!prodotto) {
+      return res.status(404).json({ 
+        error: 'Prodotto non trovato su Senetic',
+        sku: sku
+      });
+    }
+
+    // 2. Calcola disponibilità
+    const availability = prodotto.stockQuantity > 0 ? 
+      Math.min(prodotto.stockQuantity, 100) : 0;
+
+    // 3. Costruisci prodotto Shopify
+    const shopifyProduct = {
+      product: {
+        title: prodotto.itemDescription || '',
+        body_html: prodotto.longItemDescription ? he.decode(prodotto.longItemDescription) : '',
+        vendor: prodotto.productPrimaryBrand?.brandNodeName || '',
+        product_type: prodotto.productSecondaryCategory?.categoryNodeName || '',
+        variants: [{
+          price: prodotto.unitRetailPrice ? 
+            (prodotto.unitRetailPrice * (1 + (prodotto.taxRate ? prodotto.taxRate / 100 : 0))).toFixed(2) : "0.00",
+          cost: prodotto.unitNetPrice ? prodotto.unitNetPrice.toString() : "0.00",
+          sku: prodotto.manufacturerItemCode || '',
+          barcode: prodotto.ean ? String(prodotto.ean) : '',
+          inventory_quantity: availability,
+          inventory_management: "shopify",
+          weight: prodotto.weight ? Number(prodotto.weight) : 0,
+          weight_unit: "kg",
+        }]
+      }
+    };
+
+    // 4. Cerca prodotto esistente su Shopify
+    const searchResponse = await axios.get(
+      `${process.env.SHOPIFY_STORE_URL}/admin/api/2024-04/products.json?limit=250`,
+      {
+        headers: {
+          'X-Shopify-Access-Token': process.env.SHOPIFY_ACCESS_TOKEN,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    const allProducts = searchResponse.data.products || [];
+    let existingProduct = null;
+    let existingVariant = null;
+    
+    for (const product of allProducts) {
+      const variant = product.variants.find(v => v.sku === sku);
+      if (variant) {
+        existingProduct = product;
+        existingVariant = variant;
+        break;
+      }
+    }
+
+    if (existingProduct && existingVariant) {
+      // 5. Aggiorna prodotto esistente
+      const productId = existingProduct.id;
+      const variantId = existingVariant.id;
+
+      console.log(`🔄 [SINGLE] Aggiornando prodotto: ${sku} (ID: ${productId})`);
+
+      // Aggiorna variante (prezzi, inventario)
+      await axios.put(
+        `${process.env.SHOPIFY_STORE_URL}/admin/api/2024-04/variants/${variantId}.json`,
+        {
+          variant: {
+            id: variantId,
+            price: shopifyProduct.product.variants[0].price,
+            cost: shopifyProduct.product.variants[0].cost,
+            inventory_quantity: availability,
+            barcode: shopifyProduct.product.variants[0].barcode,
+            weight: shopifyProduct.product.variants[0].weight,
+            weight_unit: shopifyProduct.product.variants[0].weight_unit
+          }
+        },
+        {
+          headers: {
+            'X-Shopify-Access-Token': process.env.SHOPIFY_ACCESS_TOKEN,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      res.json({
+        success: true,
+        action: 'updated',
+        sku: sku,
+        shopify_id: productId,
+        variant_id: variantId,
+        price: shopifyProduct.product.variants[0].price,
+        inventory: availability,
+        timestamp: new Date().toISOString()
+      });
+
+    } else {
+      res.status(404).json({
+        success: false,
+        error: 'Prodotto non trovato su Shopify',
+        sku: sku,
+        action: 'not_found'
+      });
+    }
 
   } catch (error) {
-    console.error('❌ Errore attivazione workflow:', error.message);
-    console.error('📄 Dettagli:', error.response?.data);
-    
-    res.status(500).json({ 
+    console.error(`❌ [SINGLE] Errore ${sku}:`, error.message);
+    res.status(500).json({
       success: false,
-      error: 'Errore attivazione workflow',
-      details: error.message,
+      error: error.message,
+      sku: sku,
       timestamp: new Date().toISOString()
     });
   }
