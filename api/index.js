@@ -8,6 +8,95 @@ const app = express();
 const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 
+function extractImageUrls(htmlContent) {
+  if (!htmlContent) return [];
+  
+  const imageUrls = [];
+  const imgRegex = /<img[^>]+src="([^"]+)"/gi;
+  let match;
+  
+  while ((match = imgRegex.exec(htmlContent)) !== null) {
+    const imgUrl = match[1];
+    
+    // Filtra solo immagini valide e non base64
+    if (imgUrl && 
+        !imgUrl.startsWith('data:') && 
+        (imgUrl.includes('.jpg') || imgUrl.includes('.jpeg') || imgUrl.includes('.png') || imgUrl.includes('.gif'))) {
+      
+      // Converti URL relativi in assoluti se necessario
+      const fullUrl = imgUrl.startsWith('http') ? imgUrl : `https://b2b.senetic.com${imgUrl}`;
+      imageUrls.push(fullUrl);
+    }
+  }
+  
+  // Rimuovi duplicati
+  return [...new Set(imageUrls)];
+}
+
+async function uploadImagesToShopify(imageUrls, productId) {
+  const uploadedImages = [];
+  
+  for (const imageUrl of imageUrls) {
+    try {
+      console.log(`📸 Scaricando immagine: ${imageUrl}`);
+      
+      // 1. Scarica l'immagine
+      const imageResponse = await axios.get(imageUrl, {
+        responseType: 'arraybuffer',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; Senetic-Shopify-Sync/1.0)',
+          'Accept': 'image/*'
+        },
+        timeout: 10000 // 10 secondi timeout
+      });
+      
+      // 2. Converti in base64
+      const base64Image = Buffer.from(imageResponse.data).toString('base64');
+      const mimeType = imageResponse.headers['content-type'] || 'image/jpeg';
+      
+      // 3. Carica su Shopify
+      const shopifyImageData = {
+        image: {
+          product_id: productId,
+          src: `data:${mimeType};base64,${base64Image}`,
+          alt: 'Immagine prodotto da Senetic'
+        }
+      };
+      
+      const uploadResponse = await axios.post(
+        `${SHOPIFY_STORE_URL}/admin/api/2024-04/products/${productId}/images.json`,
+        shopifyImageData,
+        {
+          headers: {
+            'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      
+      uploadedImages.push({
+        original_url: imageUrl,
+        shopify_url: uploadResponse.data.image.src,
+        shopify_id: uploadResponse.data.image.id
+      });
+      
+      console.log(`✅ Immagine caricata su Shopify: ${uploadResponse.data.image.id}`);
+      
+      // Rate limiting per evitare sovraccarico
+      await new Promise(r => setTimeout(r, 500));
+      
+    } catch (error) {
+      console.error(`❌ Errore caricamento immagine ${imageUrl}:`, error.message);
+      uploadedImages.push({
+        original_url: imageUrl,
+        error: error.message
+      });
+    }
+  }
+  
+  return uploadedImages;
+}
+
 app.get('/', (req, res) => {
   res.json({
     message: 'Senetic-Shopify Sync API',
@@ -102,20 +191,23 @@ app.get('/import-shopify', async (req, res) => {
           body_html: prodotto.longItemDescription ? he.decode(prodotto.longItemDescription) : '',
           vendor: prodotto.productPrimaryBrand?.brandNodeName || '',
           product_type: prodotto.productSecondaryCategory?.categoryNodeName || '',
-          variants: [
-            {
-              price: prodotto.unitRetailPrice ? (prodotto.unitRetailPrice * (1 + (prodotto.taxRate ? prodotto.taxRate / 100 : 0))).toFixed(2) : "0.00",
-              cost: prodotto.unitNetPrice ? prodotto.unitNetPrice.toString() : "0.00",
-              sku: prodotto.manufacturerItemCode || '',
-              barcode: prodotto.ean ? String(prodotto.ean) : '',
-              inventory_quantity: availability,
-              inventory_management: "shopify",
-              weight: prodotto.weight ? Number(prodotto.weight) : 0,
-              weight_unit: "kg",
-            }
-          ]
+          variants: [{
+            price: prodotto.unitRetailPrice ? 
+              (prodotto.unitRetailPrice * (1 + (prodotto.taxRate ? prodotto.taxRate / 100 : 0))).toFixed(2) : "0.00",
+            cost: prodotto.unitNetPrice ? prodotto.unitNetPrice.toString() : "0.00",
+            sku: prodotto.manufacturerItemCode || '',
+            barcode: prodotto.ean ? String(prodotto.ean) : '',
+            inventory_quantity: availability,
+            inventory_management: "shopify",
+            weight: prodotto.weight ? Number(prodotto.weight) : 0,
+            weight_unit: "kg",
+          }]
         }
       };
+
+      let uploadedImages = [];
+      const imageUrls = extractImageUrls(prodotto.longItemDescription);
+      console.log(`📸 Trovate ${imageUrls.length} immagini per ${prodotto.manufacturerItemCode}`);
 
       try {
         // ✅ FORZA CREAZIONE (senza cercare esistenti per evitare sovrascrizioni)
@@ -132,6 +224,12 @@ app.get('/import-shopify', async (req, res) => {
           }
         );
 
+        // CARICA IMMAGINI PER NUOVO PRODOTTO
+        if (imageUrls.length > 0) {
+          console.log(`📸 Caricando ${imageUrls.length} immagini per prodotto: ${prodotto.manufacturerItemCode}`);
+          uploadedImages = await uploadImagesToShopify(imageUrls, createResult.data.product.id);
+        }
+
         risultati.push({
           title: shopifyProduct.product.title,
           body_html: shopifyProduct.product.body_html,
@@ -145,6 +243,12 @@ app.get('/import-shopify', async (req, res) => {
           inventory_management: shopifyProduct.product.variants[0].inventory_management,
           weight: shopifyProduct.product.variants[0].weight,
           weight_unit: shopifyProduct.product.variants[0].weight_unit,
+          images: {
+            found: imageUrls.length,
+            uploaded: uploadedImages.filter(img => !img.error).length,
+            failed: uploadedImages.filter(img => img.error).length,
+            details: uploadedImages
+          },
           status: 'ok',
           shopify_id: createResult.data.product.id
         });
@@ -265,20 +369,23 @@ app.get('/import-shopify-cron', async (req, res) => {
           body_html: prodotto.longItemDescription ? he.decode(prodotto.longItemDescription) : '',
           vendor: prodotto.productPrimaryBrand?.brandNodeName || '',
           product_type: prodotto.productSecondaryCategory?.categoryNodeName || '',
-          variants: [
-            {
-              price: prodotto.unitRetailPrice ? (prodotto.unitRetailPrice * (1 + (prodotto.taxRate ? prodotto.taxRate / 100 : 0))).toFixed(2) : "0.00",
-              cost: prodotto.unitNetPrice ? prodotto.unitNetPrice.toString() : "0.00",
-              sku: prodotto.manufacturerItemCode || '',
-              barcode: prodotto.ean ? String(prodotto.ean) : '',
-              inventory_quantity: availability,
-              inventory_management: "shopify",
-              weight: prodotto.weight ? Number(prodotto.weight) : 0,
-              weight_unit: "kg",
-            }
-          ]
+          variants: [{
+            price: prodotto.unitRetailPrice ? 
+              (prodotto.unitRetailPrice * (1 + (prodotto.taxRate ? prodotto.taxRate / 100 : 0))).toFixed(2) : "0.00",
+            cost: prodotto.unitNetPrice ? prodotto.unitNetPrice.toString() : "0.00",
+            sku: prodotto.manufacturerItemCode || '',
+            barcode: prodotto.ean ? String(prodotto.ean) : '',
+            inventory_quantity: availability,
+            inventory_management: "shopify",
+            weight: prodotto.weight ? Number(prodotto.weight) : 0,
+            weight_unit: "kg",
+          }]
         }
       };
+
+      let uploadedImages = [];
+      const imageUrls = extractImageUrls(prodotto.longItemDescription);
+      console.log(`📸 Trovate ${imageUrls.length} immagini per ${prodotto.manufacturerItemCode}`);
 
       try {
         // 🔍 CERCA PRODOTTO ESISTENTE per SKU - METODO MIGLIORATO
@@ -358,11 +465,62 @@ app.get('/import-shopify-cron', async (req, res) => {
               }
             }
           );
+
+          // 🆕 GESTISCI IMMAGINI PER AGGIORNAMENTO
+          if (imageUrls.length > 0) {
+            console.log(`📸 Aggiornando immagini per prodotto esistente: ${prodotto.manufacturerItemCode}`);
+            
+            // Rimuovi immagini esistenti (opzionale)
+            try {
+              const existingImagesResponse = await axios.get(
+                `${SHOPIFY_STORE_URL}/admin/api/2024-04/products/${productId}/images.json`,
+                {
+                  headers: {
+                    'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+                    'Content-Type': 'application/json'
+                  }
+                }
+              );
+              
+              // Elimina immagini esistenti
+              for (const img of existingImagesResponse.data.images) {
+                await axios.delete(
+                  `${SHOPIFY_STORE_URL}/admin/api/2024-04/products/${productId}/images/${img.id}.json`,
+                  {
+                    headers: {
+                      'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+                      'Content-Type': 'application/json'
+                    }
+                  }
+                );
+              }
+            } catch (error) {
+              console.warn('⚠️ Errore rimozione immagini esistenti:', error.message);
+            }
+            
+            // Carica nuove immagini
+            uploadedImages = await uploadImagesToShopify(imageUrls, productId);
+          }
           
           risultati.push({
             title: shopifyProduct.product.title,
+            body_html: shopifyProduct.product.body_html,
+            vendor: shopifyProduct.product.vendor,
+            product_type: shopifyProduct.product.product_type,
             price: shopifyProduct.product.variants[0].price,
+            cost: shopifyProduct.product.variants[0].cost,
             sku: shopifyProduct.product.variants[0].sku,
+            barcode: shopifyProduct.product.variants[0].barcode,
+            inventory_quantity: shopifyProduct.product.variants[0].inventory_quantity,
+            inventory_management: shopifyProduct.product.variants[0].inventory_management,
+            weight: shopifyProduct.product.variants[0].weight,
+            weight_unit: shopifyProduct.product.variants[0].weight_unit,
+            images: {
+              found: imageUrls.length,
+              uploaded: uploadedImages.filter(img => !img.error).length,
+              failed: uploadedImages.filter(img => img.error).length,
+              details: uploadedImages
+            },
             status: 'aggiornato',
             shopify_id: productId,
             action: 'updated',
@@ -383,6 +541,14 @@ app.get('/import-shopify-cron', async (req, res) => {
               }
             }
           );
+
+          const newProductId = createResult.data.product.id;
+  
+          // 🆕 CARICA IMMAGINI PER NUOVO PRODOTTO
+          if (imageUrls.length > 0) {
+            console.log(`📸 Caricando ${imageUrls.length} immagini per nuovo prodotto: ${sku}`);
+            uploadedImages = await uploadImagesToShopify(imageUrls, newProductId);
+          }
           
           risultati.push({
             title: shopifyProduct.product.title,
@@ -397,6 +563,12 @@ app.get('/import-shopify-cron', async (req, res) => {
             inventory_management: shopifyProduct.product.variants[0].inventory_management,
             weight: shopifyProduct.product.variants[0].weight,
             weight_unit: shopifyProduct.product.variants[0].weight_unit,
+            images: {
+              found: imageUrls.length,
+              uploaded: uploadedImages.filter(img => !img.error).length,
+              failed: uploadedImages.filter(img => img.error).length,
+              details: uploadedImages
+            },
             status: 'creato',
             shopify_id: createResult.data.product.id,
             action: 'created'
@@ -523,6 +695,10 @@ app.get('/sync-single-product/:sku', async (req, res) => {
       }
     };
 
+      let uploadedImages = [];
+      const imageUrls = extractImageUrls(prodotto.longItemDescription);
+      console.log(`📸 Trovate ${imageUrls.length} immagini per ${prodotto.manufacturerItemCode}`);
+
     // 6. 🔧 RICERCA MIGLIORATA - Cerca in TUTTI i prodotti usando paginazione
     console.log(`🔍 [SINGLE] Cercando prodotto esistente con SKU: ${sku}`);
     
@@ -624,6 +800,42 @@ app.get('/sync-single-product/:sku', async (req, res) => {
         }
       );
 
+      // 🆕 GESTISCI IMMAGINI PER AGGIORNAMENTO
+      if (imageUrls.length > 0) {
+        console.log(`📸 Aggiornando immagini per prodotto esistente: ${prodotto.manufacturerItemCode}`);
+        
+        // Rimuovi immagini esistenti (opzionale)
+        try {
+          const existingImagesResponse = await axios.get(
+            `${SHOPIFY_STORE_URL}/admin/api/2024-04/products/${productId}/images.json`,
+            {
+              headers: {
+                'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+                'Content-Type': 'application/json'
+              }
+            }
+          );
+          
+          // Elimina immagini esistenti
+          for (const img of existingImagesResponse.data.images) {
+            await axios.delete(
+              `${SHOPIFY_STORE_URL}/admin/api/2024-04/products/${productId}/images/${img.id}.json`,
+              {
+                headers: {
+                  'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+                  'Content-Type': 'application/json'
+                }
+              }
+            );
+          }
+        } catch (error) {
+          console.warn('⚠️ Errore rimozione immagini esistenti:', error.message);
+        }
+        
+        // Carica nuove immagini
+        uploadedImages = await uploadImagesToShopify(imageUrls, productId);
+      }
+
       res.json({
         success: true,
         action: 'updated',
@@ -646,7 +858,13 @@ app.get('/sync-single-product/:sku', async (req, res) => {
           brand: prodotto.productPrimaryBrand?.brandNodeName,
           category: prodotto.productSecondaryCategory?.categoryNodeName
         },
-        timestamp: new Date().toISOString()
+        images: {
+          found: imageUrls.length,
+          uploaded: uploadedImages.filter(img => !img.error).length,
+          failed: uploadedImages.filter(img => img.error).length,
+          details: uploadedImages
+        },
+        timestamp: new Date().toISOString(),
       });
 
     } else {
@@ -663,6 +881,14 @@ app.get('/sync-single-product/:sku', async (req, res) => {
           }
         }
       );
+
+      const newProductId = createResult.data.product.id;
+  
+      // 🆕 CARICA IMMAGINI PER NUOVO PRODOTTO
+      if (imageUrls.length > 0) {
+        console.log(`📸 Caricando ${imageUrls.length} immagini per nuovo prodotto: ${prodotto.manufacturerItemCode}`);
+        uploadedImages = await uploadImagesToShopify(imageUrls, newProductId);
+      }
 
       res.json({
         success: true,
@@ -685,8 +911,15 @@ app.get('/sync-single-product/:sku', async (req, res) => {
           brand: prodotto.productPrimaryBrand?.brandNodeName,
           category: prodotto.productSecondaryCategory?.categoryNodeName
         },
-        timestamp: new Date().toISOString()
+        images: {
+          found: imageUrls.length,
+          uploaded: uploadedImages.filter(img => !img.error).length,
+          failed: uploadedImages.filter(img => img.error).length,
+          details: uploadedImages
+        },
+        timestamp: new Date().toISOString(),
       });
+
     }
 
   } catch (error) {
