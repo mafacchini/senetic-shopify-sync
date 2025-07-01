@@ -1,21 +1,39 @@
 name: '🛍️ Sincronizzazione Senetic → Shopify'
 
 on:
+  # 🔥 TRIGGER SU WEBHOOK da Shopify
+  repository_dispatch:
+    types: [shopify_update]
+  
+  # 📱 TRIGGER MANUALE (mantieni per debug)
+  workflow_dispatch:
+  
+  # ⏰ TRIGGER PROGRAMMATO (opzionale - backup)
   schedule:
-    # Ogni giorno alle 6:00 UTC (8:00 ora italiana CEST)
-    - cron: '0 6 * * *'
-  workflow_dispatch: # Permette esecuzione manuale dal pulsante
+    # Backup ogni 6 ore nel caso il webhook fallisca
+    - cron: '0 */6 * * *'
 
 env:
   API_URL: 'https://app-senetic-shopify.vercel.app'
 
 jobs:
   sync-products:
-    name: '📦 Importa Prodotti da Senetic'
+    name: '🔄 Sync Triggered by Shopify Update'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     
     steps:
+      - name: '🚀 Detect Trigger Type'
+        run: |
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            echo "🔔 Attivato da webhook Shopify!"
+            echo "📝 Tipo evento: ${{ github.event.action }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "👤 Attivato manualmente"
+          else
+            echo "⏰ Attivato da schedule"
+          fi
+    
       - name: '🚀 Inizio Sincronizzazione'
         run: |
           echo "🕕 Avvio sincronizzazione automatica alle $(date)"
