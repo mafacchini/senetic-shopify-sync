@@ -9,22 +9,42 @@ const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 
 function extractImageUrls(htmlContent) {
-  if (!htmlContent) return [];
-
-  console.log(`🔍 [DEBUG] HTML content length: ${htmlContent.length}`);
-  console.log(`🔍 [DEBUG] HTML contains img tags: ${htmlContent.includes('<img')}`);
+  console.log(`🚨 [SUPER-DEBUG] Funzione extractImageUrls chiamata!`);
+  
+  if (!htmlContent) {
+    console.log(`🚨 [SUPER-DEBUG] htmlContent è null/undefined!`);
+    return [];
+  }
+  
+  console.log(`🚨 [SUPER-DEBUG] HTML content length: ${htmlContent.length}`);
+  console.log(`🚨 [SUPER-DEBUG] HTML contains img tags: ${htmlContent.includes('<img')}`);
+  console.log(`🚨 [SUPER-DEBUG] Primi 500 caratteri HTML:`, htmlContent.substring(0, 500));
   
   const imageUrls = [];
   const imgRegex = /<img[^>]+src="([^"]+)"/gi;
   let match;
+  let matchCount = 0;
   
   while ((match = imgRegex.exec(htmlContent)) !== null) {
+    matchCount++;
+    console.log(`🚨 [SUPER-DEBUG] Match ${matchCount}: ${match[1]}`);
+    
     let imgUrl = match[1];
+    
+    // Verifica ogni condizione singolarmente
+    console.log(`🚨 [SUPER-DEBUG] imgUrl: ${imgUrl}`);
+    console.log(`🚨 [SUPER-DEBUG] Starts with data?: ${imgUrl.startsWith('data:')}`);
+    console.log(`🚨 [SUPER-DEBUG] Contains .jpg?: ${imgUrl.includes('.jpg')}`);
+    console.log(`🚨 [SUPER-DEBUG] Contains .jpeg?: ${imgUrl.includes('.jpeg')}`);
+    console.log(`🚨 [SUPER-DEBUG] Contains .png?: ${imgUrl.includes('.png')}`);
+    console.log(`🚨 [SUPER-DEBUG] Contains .gif?: ${imgUrl.includes('.gif')}`);
     
     // Filtra solo immagini valide e non base64
     if (imgUrl && 
         !imgUrl.startsWith('data:') && 
         (imgUrl.includes('.jpg') || imgUrl.includes('.jpeg') || imgUrl.includes('.png') || imgUrl.includes('.gif'))) {
+      
+      console.log(`🚨 [SUPER-DEBUG] Immagine valida trovata: ${imgUrl}`);
       
       // 🔧 CORREZIONE: Gestisci tutti i tipi di URL
       let fullUrl;
@@ -32,23 +52,36 @@ function extractImageUrls(htmlContent) {
       if (imgUrl.startsWith('http://') || imgUrl.startsWith('https://')) {
         // URL già completo
         fullUrl = imgUrl;
+        console.log(`🚨 [SUPER-DEBUG] URL completo: ${fullUrl}`);
       } else if (imgUrl.startsWith('//')) {
         // ✅ URL protocol-relative (//domain.com/path)
         fullUrl = `https:${imgUrl}`;
+        console.log(`🚨 [SUPER-DEBUG] URL protocol-relative convertito: ${fullUrl}`);
       } else if (imgUrl.startsWith('/')) {
         // URL relativo assoluto (/path/image.jpg)
         fullUrl = `https://senetic.pl${imgUrl}`;
+        console.log(`🚨 [SUPER-DEBUG] URL relativo assoluto convertito: ${fullUrl}`);
       } else {
         // URL relativo (path/image.jpg)
         fullUrl = `https://senetic.pl/${imgUrl}`;
+        console.log(`🚨 [SUPER-DEBUG] URL relativo convertito: ${fullUrl}`);
       }
       
       imageUrls.push(fullUrl);
+      console.log(`🚨 [SUPER-DEBUG] Aggiunto all'array: ${fullUrl}`);
+    } else {
+      console.log(`🚨 [SUPER-DEBUG] Immagine scartata: ${imgUrl}`);
     }
   }
   
+  console.log(`🚨 [SUPER-DEBUG] Totale match trovati: ${matchCount}`);
+  console.log(`🚨 [SUPER-DEBUG] Totale immagini valide: ${imageUrls.length}`);
+  console.log(`🚨 [SUPER-DEBUG] Array finale:`, imageUrls);
+  
   // Rimuovi duplicati
-  return [...new Set(imageUrls)];
+  const uniqueUrls = [...new Set(imageUrls)];
+  console.log(`🚨 [SUPER-DEBUG] Dopo rimozione duplicati: ${uniqueUrls.length}`);
+  return uniqueUrls;
 }
 
 async function uploadImagesToShopify(imageUrls, productId) {
