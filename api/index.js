@@ -8,6 +8,18 @@ const app = express();
 const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Senetic-Shopify Sync API',
+    endpoints: {
+      'import': '/import-shopify',
+      'import_cron': '/import-shopify-cron',
+      'single_sync': '/sync-single-product/:sku'
+    },
+    version: '2.0.0'
+  });
+});
+
 app.get('/import-shopify', async (req, res) => {
   try {
     // 1. Recupera inventario e catalogo
@@ -162,15 +174,6 @@ app.get('/import-shopify', async (req, res) => {
     console.error('Errore:', error);
     res.status(500).json({ error: error.toString() });
   }
-});
-
-app.get('/', (req, res) => {
-  res.json({
-    message: 'Senetic-Shopify Sync API',
-    endpoints: {
-      'import': '/import-shopify'
-    }
-  });
 });
 
 app.get('/import-shopify-cron', async (req, res) => {
@@ -433,8 +436,6 @@ app.get('/import-shopify-cron', async (req, res) => {
   }
 });
 
-// Aggiungi questo nuovo endpoint in api/index.js:
-
 app.get('/sync-single-product/:sku', async (req, res) => {
   const sku = req.params.sku;
   
@@ -447,18 +448,35 @@ app.get('/sync-single-product/:sku', async (req, res) => {
   try {
     console.log(`🔍 [SINGLE] Sincronizzazione prodotto: ${sku}`);
 
-    // 1. Ottieni dati da Senetic per questo SKU specifico
-    const seneticResponse = await axios.get(
-      `https://api.senetic.pl/api/products?filter[manufacturerItemCode]=${sku}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${process.env.SENETIC_AUTH}`,
-          'Content-Type': 'application/json'
+    // 1. Recupera inventario e catalogo con Promise.all (come negli altri endpoint)
+    const [inventoryResponse, catalogueResponse] = await Promise.all([
+      axios.get(
+        'https://b2b.senetic.com/Gateway/ClientApi/InventoryReportGet?UseItemCategoryFilter=true&LangId=IT',
+        {
+          headers: {
+            'accept': 'application/json',
+            'Authorization': process.env.SENETIC_AUTH,
+            'User-Agent': 'Mozilla/5.0'
+          }
         }
-      }
-    );
+      ),
+      axios.get(
+        'https://b2b.senetic.com/Gateway/ClientApi/ProductCatalogueGet?UseItemCategoryFilter=true&LangId=IT',
+        {
+          headers: {
+            'accept': 'application/json',
+            'Authorization': process.env.SENETIC_AUTH,
+            'User-Agent': 'Mozilla/5.0'
+          }
+        }
+      )
+    ]);
 
-    const prodotto = seneticResponse.data.data.find(p => p.manufacturerItemCode === sku);
+    const inventoryLines = inventoryResponse.data.lines || [];
+    const catalogueLines = catalogueResponse.data.lines || [];
+
+    // 2. Trova il prodotto specifico nel catalogo
+    const prodotto = catalogueLines.find(p => p.manufacturerItemCode === sku);
     
     if (!prodotto) {
       return res.status(404).json({ 
@@ -467,11 +485,22 @@ app.get('/sync-single-product/:sku', async (req, res) => {
       });
     }
 
-    // 2. Calcola disponibilità
-    const availability = prodotto.stockQuantity > 0 ? 
-      Math.min(prodotto.stockQuantity, 100) : 0;
+    // 3. Trova l'inventario corrispondente
+    const inventoryItem = inventoryLines.find(item => item.manufacturerItemCode === sku);
+    
+    if (!inventoryItem) {
+      return res.status(404).json({ 
+        error: 'Inventario non trovato per questo prodotto',
+        sku: sku
+      });
+    }
 
-    // 3. Costruisci prodotto Shopify
+    // 4. Calcola disponibilità (stessa logica degli altri endpoint)
+    const availability = inventoryItem.availability && Array.isArray(inventoryItem.availability.stockSchedules)
+      ? inventoryItem.availability.stockSchedules.reduce((sum, s) => sum + (s.targetStock || 0), 0)
+      : 0;
+
+    // 5. Costruisci prodotto Shopify (stessa struttura degli altri endpoint)
     const shopifyProduct = {
       product: {
         title: prodotto.itemDescription || '',
@@ -492,12 +521,12 @@ app.get('/sync-single-product/:sku', async (req, res) => {
       }
     };
 
-    // 4. Cerca prodotto esistente su Shopify
+    // 6. Cerca prodotto esistente su Shopify (stessa logica dell'endpoint CRON)
     const searchResponse = await axios.get(
-      `${process.env.SHOPIFY_STORE_URL}/admin/api/2024-04/products.json?limit=250`,
+      `${SHOPIFY_STORE_URL}/admin/api/2024-04/products.json?limit=250`,
       {
         headers: {
-          'X-Shopify-Access-Token': process.env.SHOPIFY_ACCESS_TOKEN,
+          'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
           'Content-Type': 'application/json'
         }
       }
@@ -517,15 +546,35 @@ app.get('/sync-single-product/:sku', async (req, res) => {
     }
 
     if (existingProduct && existingVariant) {
-      // 5. Aggiorna prodotto esistente
+      // 7. Aggiorna prodotto esistente (stessa logica dell'endpoint CRON)
       const productId = existingProduct.id;
       const variantId = existingVariant.id;
 
       console.log(`🔄 [SINGLE] Aggiornando prodotto: ${sku} (ID: ${productId})`);
 
+      // Aggiorna dati prodotto
+      await axios.put(
+        `${SHOPIFY_STORE_URL}/admin/api/2024-04/products/${productId}.json`,
+        {
+          product: {
+            id: productId,
+            title: shopifyProduct.product.title,
+            body_html: shopifyProduct.product.body_html,
+            vendor: shopifyProduct.product.vendor,
+            product_type: shopifyProduct.product.product_type
+          }
+        },
+        {
+          headers: {
+            'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
       // Aggiorna variante (prezzi, inventario)
       await axios.put(
-        `${process.env.SHOPIFY_STORE_URL}/admin/api/2024-04/variants/${variantId}.json`,
+        `${SHOPIFY_STORE_URL}/admin/api/2024-04/variants/${variantId}.json`,
         {
           variant: {
             id: variantId,
@@ -539,7 +588,7 @@ app.get('/sync-single-product/:sku', async (req, res) => {
         },
         {
           headers: {
-            'X-Shopify-Access-Token': process.env.SHOPIFY_ACCESS_TOKEN,
+            'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
             'Content-Type': 'application/json'
           }
         }
@@ -553,6 +602,11 @@ app.get('/sync-single-product/:sku', async (req, res) => {
         variant_id: variantId,
         price: shopifyProduct.product.variants[0].price,
         inventory: availability,
+        senetic_data: {
+          title: prodotto.itemDescription,
+          brand: prodotto.productPrimaryBrand?.brandNodeName,
+          category: prodotto.productSecondaryCategory?.categoryNodeName
+        },
         timestamp: new Date().toISOString()
       });
 
@@ -561,7 +615,14 @@ app.get('/sync-single-product/:sku', async (req, res) => {
         success: false,
         error: 'Prodotto non trovato su Shopify',
         sku: sku,
-        action: 'not_found'
+        action: 'not_found',
+        senetic_found: true,
+        senetic_data: {
+          title: prodotto.itemDescription,
+          brand: prodotto.productPrimaryBrand?.brandNodeName,
+          category: prodotto.productSecondaryCategory?.categoryNodeName,
+          inventory: availability
+        }
       });
     }
 
