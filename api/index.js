@@ -16,15 +16,30 @@ function extractImageUrls(htmlContent) {
   let match;
   
   while ((match = imgRegex.exec(htmlContent)) !== null) {
-    const imgUrl = match[1];
+    let imgUrl = match[1];
     
     // Filtra solo immagini valide e non base64
     if (imgUrl && 
         !imgUrl.startsWith('data:') && 
         (imgUrl.includes('.jpg') || imgUrl.includes('.jpeg') || imgUrl.includes('.png') || imgUrl.includes('.gif'))) {
       
-      // Converti URL relativi in assoluti se necessario
-      const fullUrl = imgUrl.startsWith('http') ? imgUrl : `https://b2b.senetic.com${imgUrl}`;
+      // 🔧 CORREZIONE: Gestisci tutti i tipi di URL
+      let fullUrl;
+      
+      if (imgUrl.startsWith('http://') || imgUrl.startsWith('https://')) {
+        // URL già completo
+        fullUrl = imgUrl;
+      } else if (imgUrl.startsWith('//')) {
+        // ✅ URL protocol-relative (//domain.com/path)
+        fullUrl = `https:${imgUrl}`;
+      } else if (imgUrl.startsWith('/')) {
+        // URL relativo assoluto (/path/image.jpg)
+        fullUrl = `https://senetic.pl${imgUrl}`;
+      } else {
+        // URL relativo (path/image.jpg)
+        fullUrl = `https://senetic.pl/${imgUrl}`;
+      }
+      
       imageUrls.push(fullUrl);
     }
   }
