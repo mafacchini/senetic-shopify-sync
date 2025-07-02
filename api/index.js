@@ -5,6 +5,35 @@ const he = require('he');
 
 const app = express();
 
+// ✅ CORS SPECIFICO PER IL TUO NEGOZIO SHOPIFY
+app.use((req, res, next) => {
+  // Lista domini autorizzati
+  const allowedOrigins = [
+    'https://proomnibus.shop',
+    'https://www.proomnibus.shop',
+    'https://proomnibus.myshopify.com',
+    'http://localhost:3000', // Per testing locale
+    'https://localhost:3000'
+  ];
+  
+  const origin = req.headers.origin;
+  
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+  
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Cron-Token, X-Sync-Token');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(200);
+    return;
+  }
+  
+  next();
+});
+
 app.use(express.json());
 
 const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL;
