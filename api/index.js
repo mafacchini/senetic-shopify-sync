@@ -53,6 +53,27 @@ function extractImageUrls(htmlContent) {
         fullUrl = `https://senetic.pl/${imgUrl}`;
       }
       
+      // 🔧 NUOVA CORREZIONE: Encode dell'URL per gestire spazi e caratteri speciali
+      try {
+        // Split URL in base e path
+        const urlParts = fullUrl.split('senetic.pl');
+        if (urlParts.length === 2) {
+          const basePart = urlParts[0] + 'senetic.pl';
+          const pathPart = urlParts[1];
+          
+          // Encode solo il path, non il dominio
+          const encodedPath = pathPart.split('/').map(segment => 
+            segment ? encodeURIComponent(segment) : ''
+          ).join('/');
+          
+          fullUrl = basePart + encodedPath;
+        }
+        
+        debugInfo.push(`🚨 [DEBUG] URL dopo encoding: ${fullUrl}`);
+      } catch (error) {
+        debugInfo.push(`🚨 [DEBUG] Errore encoding URL: ${error.message}`);
+      }
+      
       imageUrls.push(fullUrl);
       debugInfo.push(`🚨 [DEBUG] Aggiunto: ${fullUrl}`);
     } else {
