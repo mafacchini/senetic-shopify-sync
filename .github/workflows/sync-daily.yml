@@ -40,10 +40,11 @@ jobs:
           
           # Esegui la chiamata API con timeout di 20 minuti
           response=$(curl -s -w "%{http_code}" -o response.json --max-time 1200 \
+            -X GET \
             -H "X-Cron-Token: ${{ secrets.CRON_SECRET }}" \
             ${{ env.API_URL }}/import-shopify-cron)
-          
-          echo "📊 Codice risposta HTTP: $response"
+            -H "Content-Type: application/json" \
+            ${{ env.API_URL }}/import-shopify-cron)
           
           # Verifica se la risposta è successo
           if [ $response -eq 200 ]; then
