@@ -53,27 +53,35 @@ function extractImageUrls(htmlContent) {
         fullUrl = `https://senetic.pl/${imgUrl}`;
       }
       
-      // 🔧 NUOVA CORREZIONE: Encode dell'URL per gestire spazi e caratteri speciali
-      try {
-        // Split URL in base e path
-        const urlParts = fullUrl.split('senetic.pl');
-        if (urlParts.length === 2) {
-          const basePart = urlParts[0] + 'senetic.pl';
-          const pathPart = urlParts[1];
-          
-          // Encode solo il path, non il dominio
-          const encodedPath = pathPart.split('/').map(segment => 
-            segment ? encodeURIComponent(segment) : ''
-          ).join('/');
-          
-          fullUrl = basePart + encodedPath;
+      // 🔧 CORREZIONE: Non fare encoding se l'URL è già parzialmente encoded
+      debugInfo.push(`🚨 [DEBUG] URL prima del controllo encoding: ${fullUrl}`);
+      
+      // Controlla se l'URL contiene già caratteri encoded (come %20)
+      if (fullUrl.includes('%')) {
+        debugInfo.push(`🚨 [DEBUG] URL già parzialmente encoded, mantenendo così com'è`);
+        // Non fare nulla, usa l'URL come è
+      } else {
+        // Solo se non è già encoded, applica encoding
+        debugInfo.push(`🚨 [DEBUG] URL non encoded, applicando encoding`);
+        try {
+          const urlParts = fullUrl.split('senetic.pl');
+          if (urlParts.length === 2) {
+            const basePart = urlParts[0] + 'senetic.pl';
+            const pathPart = urlParts[1];
+            
+            // Encode solo il path, non il dominio
+            const encodedPath = pathPart.split('/').map(segment => 
+              segment ? encodeURIComponent(segment) : ''
+            ).join('/');
+            
+            fullUrl = basePart + encodedPath;
+          }
+        } catch (error) {
+          debugInfo.push(`🚨 [DEBUG] Errore encoding URL: ${error.message}`);
         }
-        
-        debugInfo.push(`🚨 [DEBUG] URL dopo encoding: ${fullUrl}`);
-      } catch (error) {
-        debugInfo.push(`🚨 [DEBUG] Errore encoding URL: ${error.message}`);
       }
       
+      debugInfo.push(`🚨 [DEBUG] URL finale: ${fullUrl}`);
       imageUrls.push(fullUrl);
       debugInfo.push(`🚨 [DEBUG] Aggiunto: ${fullUrl}`);
     } else {
