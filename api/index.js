@@ -14,19 +14,23 @@ function extractImageUrls(htmlContent) {
   
   if (!htmlContent) {
     debugInfo.push(`🚨 [DEBUG] htmlContent è null/undefined!`);
-    console.log('DEBUG_INFO:', debugInfo);
     return { urls: [], debug: debugInfo };
   }
   
   debugInfo.push(`🚨 [DEBUG] HTML content length: ${htmlContent.length}`);
-  debugInfo.push(`🚨 [DEBUG] HTML contains img tags: ${htmlContent.includes('<img')}`);
+  
+  // 🔧 CORREZIONE: Decodifica HTML entities prima dell'analisi
+  const decodedHtml = he.decode(htmlContent);
+  debugInfo.push(`🚨 [DEBUG] HTML dopo decode: ${decodedHtml.includes('<img')}`);
+  debugInfo.push(`🚨 [DEBUG] Primi 300 caratteri decoded:`, decodedHtml.substring(0, 300));
   
   const imageUrls = [];
   const imgRegex = /<img[^>]+src="([^"]+)"/gi;
   let match;
   let matchCount = 0;
   
-  while ((match = imgRegex.exec(htmlContent)) !== null) {
+  // Usa l'HTML decodificato per l'analisi
+  while ((match = imgRegex.exec(decodedHtml)) !== null) {
     matchCount++;
     debugInfo.push(`🚨 [DEBUG] Match ${matchCount}: ${match[1]}`);
     
@@ -59,7 +63,6 @@ function extractImageUrls(htmlContent) {
   debugInfo.push(`🚨 [DEBUG] Totale match: ${matchCount}`);
   debugInfo.push(`🚨 [DEBUG] Totale valide: ${imageUrls.length}`);
   
-  console.log('DEBUG_INFO:', debugInfo);
   return { urls: [...new Set(imageUrls)], debug: debugInfo };
 }
 
