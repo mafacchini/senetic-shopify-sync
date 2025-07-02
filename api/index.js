@@ -5,6 +5,8 @@ const he = require('he');
 
 const app = express();
 
+app.use(express.json());
+
 const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 
