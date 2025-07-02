@@ -89,7 +89,7 @@ async function uploadImagesToShopify(imageUrls, productId) {
         shopify_id: uploadResponse.data.image.id
       });
       
-      await new Promise(r => setTimeout(r, 500));
+      await new Promise(r => setTimeout(r, 100));
       
     } catch (error) {
       uploadedImages.push({
@@ -376,7 +376,7 @@ app.get('/import-shopify-cron', async (req, res) => {
         });
       }
 
-      await new Promise(r => setTimeout(r, 800));
+      await new Promise(r => setTimeout(r, 200));
     }
 
     res.json({ 
