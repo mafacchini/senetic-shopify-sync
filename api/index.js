@@ -746,9 +746,24 @@ app.get('/sync-single-product/:sku', async (req, res) => {
       }
     };
 
-      let uploadedImages = [];
-      const imageUrls = extractImageUrls(prodotto.longItemDescription);
-      console.log(`📸 Trovate ${imageUrls.length} immagini per ${prodotto.manufacturerItemCode}`);
+    let uploadedImages = [];
+
+    // 🚨 DEBUG PRIMA DELLA CHIAMATA
+    console.log(`🚨 [POINT-DEBUG] Sto per chiamare extractImageUrls`);
+    console.log(`🚨 [POINT-DEBUG] prodotto.longItemDescription exists: ${!!prodotto.longItemDescription}`);
+    console.log(`🚨 [POINT-DEBUG] prodotto.longItemDescription type: ${typeof prodotto.longItemDescription}`);
+    console.log(`🚨 [POINT-DEBUG] prodotto.longItemDescription length: ${prodotto.longItemDescription?.length || 0}`);
+
+    if (prodotto.longItemDescription) {
+      console.log(`🚨 [POINT-DEBUG] Primi 200 caratteri:`, prodotto.longItemDescription.substring(0, 200));
+    }
+
+    const imageUrls = extractImageUrls(prodotto.longItemDescription);
+
+    console.log(`🚨 [POINT-DEBUG] Dopo chiamata extractImageUrls`);
+    console.log(`🚨 [POINT-DEBUG] imageUrls risultato:`, imageUrls);
+    console.log(`🚨 [POINT-DEBUG] imageUrls.length:`, imageUrls.length);
+    console.log(`📸 Trovate ${imageUrls.length} immagini per ${prodotto.manufacturerItemCode}`);
 
     // 6. 🔧 RICERCA MIGLIORATA - Cerca in TUTTI i prodotti usando paginazione
     console.log(`🔍 [SINGLE] Cercando prodotto esistente con SKU: ${sku}`);
