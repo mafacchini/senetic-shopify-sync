@@ -71,27 +71,13 @@ async function uploadImagesToShopify(imageUrls, productId) {
   
   for (const imageUrl of imageUrls) {
     try {
-      console.log(`📸 Scaricando immagine: ${imageUrl}`);
+      console.log(`📸 Caricando immagine diretta: ${imageUrl}`);
       
-      // 1. Scarica l'immagine
-      const imageResponse = await axios.get(imageUrl, {
-        responseType: 'arraybuffer',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; Senetic-Shopify-Sync/1.0)',
-          'Accept': 'image/*'
-        },
-        timeout: 10000 // 10 secondi timeout
-      });
-      
-      // 2. Converti in base64
-      const base64Image = Buffer.from(imageResponse.data).toString('base64');
-      const mimeType = imageResponse.headers['content-type'] || 'image/jpeg';
-      
-      // 3. Carica su Shopify
+      // 🔧 SOLUZIONE: Usa URL diretto invece di scaricare e convertire in base64
       const shopifyImageData = {
         image: {
           product_id: productId,
-          src: `data:${mimeType};base64,${base64Image}`,
+          src: imageUrl,  // ⬅️ USA URL DIRETTO!
           alt: 'Immagine prodotto da Senetic'
         }
       };
@@ -120,9 +106,16 @@ async function uploadImagesToShopify(imageUrls, productId) {
       
     } catch (error) {
       console.error(`❌ Errore caricamento immagine ${imageUrl}:`, error.message);
+      
+      // 🔧 DEBUG: Mostra dettagli errore Shopify
+      if (error.response?.data) {
+        console.error(`❌ Dettagli errore Shopify:`, JSON.stringify(error.response.data, null, 2));
+      }
+      
       uploadedImages.push({
         original_url: imageUrl,
-        error: error.message
+        error: error.message,
+        shopify_error: error.response?.data
       });
     }
   }
