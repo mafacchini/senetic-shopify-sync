@@ -42,9 +42,8 @@ jobs:
           response=$(curl -s -w "%{http_code}" -o response.json --max-time 1200 \
             -X GET \
             -H "X-Cron-Token: ${{ secrets.CRON_SECRET }}" \
-            ${{ env.API_URL }}/import-shopify-cron)
             -H "Content-Type: application/json" \
-            ${{ env.API_URL }}/import-shopify-cron)
+            "${{ env.API_URL }}/import-shopify-cron")
           
           # Verifica se la risposta è successo
           if [ $response -eq 200 ]; then
@@ -61,19 +60,12 @@ jobs:
         run: |
           echo "💾 Salvataggio logs per debug..."
           
-          # Crea un file di log con timestamp
-          log_file="sync-log-$(date +%Y%m%d-%H%M%S).json"
-          
-          # Aggiungi metadata al log
-          echo "{" > $log_file
-          echo "  \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"," >> $log_file
-          echo "  \"workflow_run\": \"${{ github.run_id }}\"," >> $log_file
-          echo "  \"trigger\": \"${{ github.event_name }}\"," >> $log_file
-          echo "  \"api_response\": " >> $log_file
-          cat response.json >> $log_file
-          echo "}" >> $log_file
-          
-          echo "📁 Log salvato in: $log_file"
+          if [ -f response.json ]; then
+            echo "📋 Risposta API:"
+            cat response.json | jq '.' 2>/dev/null || cat response.json
+          else
+            echo "⚠️ Nessuna risposta salvata"
+          fi
           
       - name: '🎯 Riepilogo Finale'
         if: always()
